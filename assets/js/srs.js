@@ -11,6 +11,17 @@ const HARD_DELAY = 1 * DAY;
 const GRADUATE_BOX = 5;
 const STRETCH_DELAY = 7 * DAY;
 
+// ── Time-scale (testing mode) ───────────────────────────────────────
+// 1 = real time. 24 = 1 day compresses to 1 hour (5 min → ~12 s).
+// Only new `due` stamps are scaled; already-scheduled cards are not rewritten.
+let timeScale = 1;
+export function getTimeScale() { return timeScale; }
+export function setTimeScale(scale) {
+  const n = Number(scale);
+  timeScale = Number.isFinite(n) && n >= 1 ? n : 1;
+}
+function scaled(ms) { return ms / timeScale; }
+
 export const Eval = Object.freeze({
   Again: "Again",
   Hard: "Hard",
@@ -37,20 +48,20 @@ export function applyEval(state, evalKey, now = Date.now()) {
   switch (evalKey) {
     case Eval.Again:
       s.box = 1;
-      s.due = now + AGAIN_DELAY;
+      s.due = now + scaled(AGAIN_DELAY);
       s.graduated = false;
       break;
     case Eval.Hard:
       s.box = Math.max(s.box, 1);
-      s.due = now + HARD_DELAY;
+      s.due = now + scaled(HARD_DELAY);
       break;
     case Eval.Good:
       s.box = Math.min(s.box + 1, GRADUATE_BOX);
-      s.due = now + intervalFor(s.box);
+      s.due = now + scaled(intervalFor(s.box));
       break;
     case Eval.Easy:
       s.box = Math.min(s.box + 2, GRADUATE_BOX);
-      s.due = now + intervalFor(s.box);
+      s.due = now + scaled(intervalFor(s.box));
       break;
     default:
       throw new Error(`Unknown eval: ${evalKey}`);
@@ -63,7 +74,7 @@ export function applyEval(state, evalKey, now = Date.now()) {
     ).length;
     if (successAtBox5 > 0 && (state.box ?? 0) === GRADUATE_BOX) {
       s.graduated = true;
-      s.due = now + STRETCH_DELAY;
+      s.due = now + scaled(STRETCH_DELAY);
     }
   }
   return s;

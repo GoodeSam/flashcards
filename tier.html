@@ -48,6 +48,9 @@ if (!me) {
   throw new Error("redirecting to login");
 }
 
+// Apply user settings (incl. SRS time-scale) BEFORE any storage.load() call.
+storage.applySettings();
+
 // ── Constants (per v2 plan) ───────────────────────────────────────────
 const REVEAL_DELAY_MS = 1500;
 const EVAL_DELAY_MS = 2000;
@@ -60,8 +63,10 @@ const params = new URLSearchParams(location.search);
 const tierNum = Math.min(7, Math.max(1, parseInt(params.get("t") || "1", 10)));
 document.title = `T${tierNum} · 词卡`;
 document.getElementById("tierTitle").textContent = `T${tierNum} 学习中`;
+const scale = srs.getTimeScale();
+const testBadge = scale > 1 ? `<span class="test-chip" title="测试加速中">⚡ ${scale}×</span> ` : "";
 document.getElementById("acctChip").innerHTML =
-  `${escapeHtml(me.name)} · <a href="#" id="logoutLink">切换</a>`;
+  `${testBadge}${escapeHtml(me.name)} · <a href="#" id="logoutLink">切换</a>`;
 document.getElementById("logoutLink").addEventListener("click", (e) => {
   e.preventDefault();
   auth.logout();

@@ -2,6 +2,7 @@
 // 所有 key = fc:u:<userId>:tier:<N>，由 auth.userKey() 拼接。
 
 import { userKey, getCurrentId, getUser, listUsers, createUser } from "./auth.js";
+import { getTimeScale, setTimeScale } from "./srs.js";
 
 const SCHEMA_VERSION = 1;
 
@@ -15,6 +16,14 @@ function fnv1a(str) {
 }
 
 function todayStr() {
+  // Under test-mode (scale>1), a "day" compresses — use an hour/minute bucket
+  // so the newToday / reviewedToday counters reset on the same accelerated cadence.
+  const scale = getTimeScale();
+  if (scale > 1) {
+    const bucketMs = 86_400_000 / scale; // e.g. 24× → 1h buckets
+    const bucket = Math.floor(Date.now() / bucketMs);
+    return `s${scale}:${bucket}`;
+  }
   return new Date().toISOString().slice(0, 10);
 }
 
@@ -76,6 +85,7 @@ export function save(state, userId = requireUserId()) {
 
 const DEFAULT_SETTINGS = Object.freeze({
   autoPlayAudio: "off", // "off" | "new" | "all"
+  testTimeScale: 1,     // 1 = real time; 24 = 1 day → 1 hour
 });
 
 function settingsKey(userId) {
@@ -94,7 +104,15 @@ export function loadSettings(userId = requireUserId()) {
 export function saveSettings(partial, userId = requireUserId()) {
   const merged = { ...loadSettings(userId), ...partial };
   localStorage.setItem(settingsKey(userId), JSON.stringify(merged));
+  setTimeScale(merged.testTimeScale || 1);
   return merged;
+}
+
+/** Load current user's settings AND apply side-effects (SRS time scale). */
+export function applySettings(userId = requireUserId()) {
+  const s = loadSettings(userId);
+  setTimeScale(s.testTimeScale || 1);
+  return s;
 }
 
 export function bumpStats(state, kind) {

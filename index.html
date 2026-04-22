@@ -97,8 +97,8 @@
 </div>
 
 <script type="module">
-import { load, downloadExport, importAll } from "./assets/js/storage.js";
-import { progressStats } from "./assets/js/srs.js";
+import { load, downloadExport, importAll, applySettings } from "./assets/js/storage.js";
+import { progressStats, getTimeScale } from "./assets/js/srs.js";
 import * as auth from "./assets/js/auth.js";
 
 // ── Auth guard ──────────────────────────────────────────────────────
@@ -108,9 +108,16 @@ if (!me) {
   throw new Error("redirecting to login");
 }
 
-// Topbar account chip
+// Apply user settings (including SRS time-scale) before any load() call.
+applySettings();
+
+// Topbar account chip (with test-mode badge if active)
+const scale = getTimeScale();
+const testBadge = scale > 1
+  ? `<span class="test-chip" title="测试加速中 · 1 天 → ${(24/scale).toFixed(scale===24?0:1)} 小时">⚡ ${scale}×</span> `
+  : "";
 document.getElementById("acctChip").innerHTML =
-  `${escapeHtml(me.name)} · <a href="#" id="logoutLink">切换账号</a>`;
+  `${testBadge}${escapeHtml(me.name)} · <a href="#" id="logoutLink">切换账号</a>`;
 document.getElementById("logoutLink").addEventListener("click", (e) => {
   e.preventDefault();
   auth.logout();

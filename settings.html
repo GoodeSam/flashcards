@@ -49,6 +49,25 @@
 
       <hr style="border:0; border-top:1px solid var(--border); margin:18px 0;">
 
+      <div class="field">
+        <span>⚡ 测试加速（仅用于演示 / 调试 SRS 排程）</span>
+        <div class="radio-group" id="testScaleGroup">
+          <label class="radio-row">
+            <input type="radio" name="testTimeScale" value="1">
+            <span><strong>1×</strong> · 正常（默认）· 间隔按真实天数计</span>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="testTimeScale" value="24">
+            <span><strong>24×</strong> · 加速 · 24 小时 → 1 小时, 5 分钟 Again → ~12 秒</span>
+          </label>
+        </div>
+        <div class="muted small" style="margin-top:6px;">
+          切换只影响之后生成的到期时间;已排好的卡不会重算。每日新词 / 复习上限也随加速比按小时刷新。
+        </div>
+      </div>
+
+      <hr style="border:0; border-top:1px solid var(--border); margin:18px 0;">
+
       <button type="submit" class="primary-btn">保存设置</button>
     </form>
   </section>
@@ -85,9 +104,17 @@ document.getElementById("accountInfo").innerHTML =
   ` · 创建于 ${me.createdAt ? me.createdAt.slice(0, 10) : "—"}`;
 
 // Load current settings into form
-const settings = storage.loadSettings();
+const settings = storage.applySettings();
 for (const r of document.querySelectorAll('[name=autoPlayAudio]')) {
   r.checked = (r.value === settings.autoPlayAudio);
+}
+const currentScale = String(settings.testTimeScale || 1);
+for (const r of document.querySelectorAll('[name=testTimeScale]')) {
+  r.checked = (r.value === currentScale);
+}
+// Fallback: if saved scale isn't one of the offered options, default to 1×
+if (!document.querySelector('[name=testTimeScale]:checked')) {
+  document.querySelector('[name=testTimeScale][value="1"]').checked = true;
 }
 
 // Test button
@@ -105,11 +132,13 @@ document.getElementById("testBtn").addEventListener("click", () => {
 document.getElementById("settingsForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const choice = document.querySelector('[name=autoPlayAudio]:checked')?.value || "off";
-  storage.saveSettings({ autoPlayAudio: choice });
+  const scaleChoice = Number(document.querySelector('[name=testTimeScale]:checked')?.value || 1);
+  storage.saveSettings({ autoPlayAudio: choice, testTimeScale: scaleChoice });
   const ok = document.getElementById("okBox");
+  const scaleLabel = scaleChoice > 1 ? `,测试加速 ${scaleChoice}×` : "";
   ok.textContent = `设置已保存（自动播放：${
     {off:"关闭", new:"仅新词", all:"新词与复习"}[choice]
-  }）`;
+  }${scaleLabel}）`;
   ok.classList.remove("hidden");
 });
 
