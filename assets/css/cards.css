@@ -138,7 +138,7 @@ a { color: #2563eb; text-decoration: none; }
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
 }
-.card-face.back { transform: rotateY(180deg); }
+.card-face.card-back { transform: rotateY(180deg); }
 
 /* Card front */
 .card-front .word {
