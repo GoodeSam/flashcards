@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · 词卡</title>
+<link rel="stylesheet" href="assets/css/cards.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <h1>词卡 · 登录</h1>
+  </header>
+
+  <div id="errorBox" class="error-box hidden"></div>
+  <div id="okBox" class="ok-box hidden"></div>
+
+  <section class="auth-card">
+    <h2 class="auth-title">已有账号</h2>
+    <div id="userList" class="user-list">
+      <div class="muted">本机暂无账号，请在下方创建。</div>
+    </div>
+  </section>
+
+  <section class="auth-card">
+    <h2 class="auth-title">创建新账号</h2>
+    <p class="muted small">
+      账号只在本机保存，不上传任何服务器。换设备 / 清缓存前请用首页"导出 JSON"备份。
+    </p>
+    <form id="createForm" autocomplete="off">
+      <label class="field">
+        <span>账号名</span>
+        <input id="newName" type="text" maxlength="24" required placeholder="例如：小明">
+      </label>
+      <label class="field">
+        <span>口令（可选）</span>
+        <input id="newPass" type="password" maxlength="64" placeholder="留空 = 共享设备时无门控">
+      </label>
+      <label class="field">
+        <span>口令提示（可选）</span>
+        <input id="newHint" type="text" maxlength="80" placeholder="忘了口令时给自己看一眼">
+      </label>
+      <button type="submit" class="primary-btn">创建并登录</button>
+    </form>
+    <div id="legacyMigrate" class="hidden migrate-box">
+      检测到本机已有"未关联账号"的旧学习进度。<br>
+      <label><input type="checkbox" id="migrateChk" checked> 把它迁移到新账号</label>
+    </div>
+  </section>
+
+  <section class="auth-card">
+    <h2 class="auth-title">从备份导入账号</h2>
+    <p class="muted small">
+      在另一台设备上首页导出的 <code>.json</code> 备份文件可在此恢复进度。
+    </p>
+    <label class="file-label" for="importFile">选择备份文件…</label>
+    <input type="file" id="importFile" accept="application/json" hidden>
+  </section>
+
+  <section class="muted small" style="text-align:center; margin-top:24px;">
+    本地账号 · 不联网 · 无后端
+  </section>
+</div>
+
+<script type="module">
+import * as auth from "./assets/js/auth.js";
+import { importAll } from "./assets/js/storage.js";
+
+const errorBox = document.getElementById("errorBox");
+const okBox = document.getElementById("okBox");
+const userListEl = document.getElementById("userList");
+const legacyBox = document.getElementById("legacyMigrate");
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.classList.remove("hidden");
+  okBox.classList.add("hidden");
+}
+function showOk(msg) {
+  okBox.textContent = msg;
+  okBox.classList.remove("hidden");
+  errorBox.classList.add("hidden");
+}
+
+function renderUsers() {
+  const users = auth.listUsers();
+  if (!users.length) {
+    userListEl.innerHTML = `<div class="muted">本机暂无账号，请在下方创建。</div>`;
+    return;
+  }
+  userListEl.innerHTML = users.map((u) => `
+    <div class="user-row" data-id="${u.id}">
+      <div class="user-info">
+        <div class="user-name">${escapeHtml(u.name)}</div>
+        <div class="user-meta">${u.ph ? "🔒 需口令" : "无口令"}${u.hint ? " · 提示: " + escapeHtml(u.hint) : ""}</div>
+      </div>
+      <div class="user-actions">
+        <button data-action="login" data-id="${u.id}" class="primary-btn small">登录</button>
+        <button data-action="delete" data-id="${u.id}" class="danger-btn small">删除</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+userListEl.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-action]");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const user = auth.getUser(id);
+  if (!user) return;
+  if (btn.dataset.action === "login") {
+    await loginFlow(user);
+  } else if (btn.dataset.action === "delete") {
+    if (confirm(`确认删除账号「${user.name}」及其全部学习进度？此操作不可撤销。`)) {
+      auth.deleteUser(id);
+      renderUsers();
+      showOk(`账号 ${user.name} 已删除`);
+    }
+  }
+});
+
+async function loginFlow(user) {
+  if (user.ph) {
+    const pw = prompt(`输入「${user.name}」的口令${user.hint ? "\n提示：" + user.hint : ""}`);
+    if (pw == null) return;
+    const ok = await auth.verifyPassphrase(user, pw);
+    if (!ok) { showError("口令不正确"); return; }
+  }
+  auth.setCurrent(user.id);
+  location.href = "index.html";
+}
+
+document.getElementById("createForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = document.getElementById("newName").value;
+  const pw = document.getElementById("newPass").value;
+  const hint = document.getElementById("newHint").value;
+  try {
+    const user = await auth.createUser({ name, passphrase: pw, hint });
+    if (auth.hasLegacyData() && document.getElementById("migrateChk")?.checked) {
+      const n = auth.migrateLegacyTo(user.id);
+      showOk(`账号已创建，迁移 ${n} 档旧进度。正在登录…`);
+    } else {
+      showOk("账号已创建，正在登录…");
+    }
+    auth.setCurrent(user.id);
+    setTimeout(() => location.href = "index.html", 600);
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+document.getElementById("importFile").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const result = await importAll(text);
+    showOk(`已导入「${result.user.name}」(${result.tiersRestored} 档，模式：${result.mode === "new" ? "新建" : "合并"})`);
+    renderUsers();
+    e.target.value = "";
+  } catch (err) {
+    showError(`导入失败: ${err.message}`);
+  }
+});
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+// Boot
+if (auth.hasLegacyData()) legacyBox.classList.remove("hidden");
+renderUsers();
+// 已登录则直接进
+if (auth.getCurrentId()) location.href = "index.html";
+</script>
+</body>
+</html>

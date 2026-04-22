@@ -1,9 +1,10 @@
-// localStorage persistence (v2 plan §8) — schema v1 + checksum + export/import.
+// localStorage 持久化（账号命名空间版）
+// 所有 key = fc:u:<userId>:tier:<N>，由 auth.userKey() 拼接。
+
+import { userKey, getCurrentId, getUser, listUsers, createUser } from "./auth.js";
 
 const SCHEMA_VERSION = 1;
-const KEY_PREFIX = "fc:tier:";
 
-/** Synchronous fnv-1a 32-bit (good-enough integrity check). */
 function fnv1a(str) {
   let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i += 1) {
@@ -28,46 +29,49 @@ function defaultState(tier) {
   };
 }
 
-function key(tier) {
-  return `${KEY_PREFIX}${tier}`;
+function tierKey(userId, tier) {
+  return userKey(userId, `tier:${tier}`);
 }
 
-/** Load tier state, repair if corrupted. */
-export function load(tier) {
-  const raw = localStorage.getItem(key(tier));
+function requireUserId() {
+  const id = getCurrentId();
+  if (!id) throw new Error("未登录");
+  return id;
+}
+
+/** 加载某档某用户的进度，损坏自动重置。 */
+export function load(tier, userId = requireUserId()) {
+  const raw = localStorage.getItem(tierKey(userId, tier));
   if (!raw) return defaultState(tier);
   try {
     const obj = JSON.parse(raw);
     const { checksum, ...payload } = obj;
     if (checksum && checksum !== fnv1a(JSON.stringify(payload))) {
-      console.warn(`[storage] tier${tier} checksum mismatch — using anyway`);
+      console.warn(`[storage] u=${userId} tier${tier} checksum mismatch — using anyway`);
     }
     if ((payload.version || 0) !== SCHEMA_VERSION) {
-      console.warn(`[storage] tier${tier} version mismatch, resetting`);
+      console.warn(`[storage] u=${userId} tier${tier} version mismatch, resetting`);
       return defaultState(tier);
     }
-    // Roll over per-day stats
     if (payload.today !== todayStr()) {
       payload.today = todayStr();
       payload.stats = { newToday: 0, reviewedToday: 0 };
     }
     return payload;
   } catch (e) {
-    console.error(`[storage] tier${tier} parse failed, resetting`, e);
+    console.error(`[storage] u=${userId} tier${tier} parse failed, resetting`, e);
     return defaultState(tier);
   }
 }
 
-/** Save tier state with checksum + last-modified bump. */
-export function save(state) {
+export function save(state, userId = requireUserId()) {
   state.version = SCHEMA_VERSION;
   state.lastModified = new Date().toISOString();
   const payload = JSON.stringify(state);
   const checksum = fnv1a(payload);
-  localStorage.setItem(key(state.tier), JSON.stringify({ ...state, checksum }));
+  localStorage.setItem(tierKey(userId, state.tier), JSON.stringify({ ...state, checksum }));
 }
 
-/** Bump per-day counters. */
 export function bumpStats(state, kind) {
   if (state.today !== todayStr()) {
     state.today = todayStr();
@@ -77,41 +81,99 @@ export function bumpStats(state, kind) {
   else if (kind === "review") state.stats.reviewedToday += 1;
 }
 
-/** Export ALL tier states as one JSON blob. */
-export function exportAll() {
+// ── Export / Import ──────────────────────────────────────────────────
+
+/** 导出：当前用户的所有档进度 + 用户元数据。 */
+export function exportAll(userId = requireUserId()) {
+  const user = getUser(userId);
   const dump = {
     schema: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
+    user: user ? { id: user.id, name: user.name, hint: user.hint, ph: user.ph } : null,
     tiers: {},
   };
   for (let t = 1; t <= 7; t += 1) {
-    const raw = localStorage.getItem(key(t));
+    const raw = localStorage.getItem(tierKey(userId, t));
     if (raw) dump.tiers[t] = JSON.parse(raw);
   }
   return JSON.stringify(dump, null, 2);
 }
 
-/** Import a previously exported blob. Returns count of tiers restored. */
-export function importAll(jsonText) {
+/**
+ * 导入：把备份恢复到指定用户名（不存在则创建）。
+ *  - 若同名账号存在 → 合并：每张卡按 lastModified 取较新者
+ *  - 若不存在 → 创建新账号并恢复全部进度
+ * 返回 { user, tiersRestored, mode: 'new' | 'merge' }。
+ */
+export async function importAll(jsonText, opts = {}) {
   const obj = JSON.parse(jsonText);
   if (!obj || obj.schema !== SCHEMA_VERSION) {
-    throw new Error(`Schema mismatch (got ${obj?.schema}, need ${SCHEMA_VERSION})`);
+    throw new Error(`schema 不兼容（备份 v${obj?.schema}，当前 v${SCHEMA_VERSION}）`);
   }
-  let count = 0;
+  if (!obj.user || !obj.user.name) {
+    throw new Error("备份缺用户信息");
+  }
+  const targetName = opts.renameTo || obj.user.name;
+
+  let user = listUsers().find((u) => u.name.toLowerCase() === targetName.toLowerCase());
+  let mode = "new";
+  if (!user) {
+    user = await createUser({ name: targetName, passphrase: null, hint: obj.user.hint });
+    // 把备份里的口令哈希照搬过来（用户原口令仍可登录）
+    if (obj.user.ph) {
+      const users = listUsers();
+      const u = users.find((x) => x.id === user.id);
+      u.ph = obj.user.ph;
+      localStorage.setItem("fc:users", JSON.stringify(users));
+    }
+  } else {
+    mode = "merge";
+  }
+
+  let tiersRestored = 0;
   for (const [t, payload] of Object.entries(obj.tiers || {})) {
-    localStorage.setItem(key(Number(t)), JSON.stringify(payload));
-    count += 1;
+    const tierNum = Number(t);
+    if (mode === "new") {
+      localStorage.setItem(tierKey(user.id, tierNum), JSON.stringify(payload));
+      tiersRestored += 1;
+    } else {
+      // merge: 同卡按更新时间取较新
+      const existing = load(tierNum, user.id);
+      const incoming = payload;
+      for (const [cardId, inState] of Object.entries(incoming.cards || {})) {
+        const exState = existing.cards[cardId];
+        const inMs = inState.history?.length
+          ? inState.history[inState.history.length - 1].ts
+          : 0;
+        const exMs = exState?.history?.length
+          ? exState.history[exState.history.length - 1].ts
+          : 0;
+        if (!exState || inMs > exMs) {
+          existing.cards[cardId] = inState;
+        }
+      }
+      // stats 取最大
+      existing.stats.newToday = Math.max(existing.stats.newToday, incoming.stats?.newToday || 0);
+      existing.stats.reviewedToday = Math.max(
+        existing.stats.reviewedToday,
+        incoming.stats?.reviewedToday || 0,
+      );
+      save(existing, user.id);
+      tiersRestored += 1;
+    }
   }
-  return count;
+
+  return { user, tiersRestored, mode };
 }
 
-/** Trigger a download of the export blob. */
-export function downloadExport() {
-  const blob = new Blob([exportAll()], { type: "application/json" });
+/** 触发当前用户备份 .json 文件下载。 */
+export function downloadExport(userId = requireUserId()) {
+  const user = getUser(userId);
+  const blob = new Blob([exportAll(userId)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `flashcards-backup-${todayStr()}.json`;
+  a.download = `flashcards-${user?.name || "backup"}-${todayStr()}.json`;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => {

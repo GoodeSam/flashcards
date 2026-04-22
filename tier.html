@@ -11,6 +11,7 @@
   <header class="topbar">
     <h1 id="tierTitle">…</h1>
     <div class="links">
+      <span id="acctChip" class="account-chip"></span>
       <a href="index.html">← 返回</a>
     </div>
   </header>
@@ -37,6 +38,14 @@ import * as srs from "./assets/js/srs.js";
 import * as storage from "./assets/js/storage.js";
 import * as grader from "./assets/js/grader.js";
 import * as tts from "./assets/js/tts.js";
+import * as auth from "./assets/js/auth.js";
+
+// ── Auth guard ────────────────────────────────────────────────────────
+const me = auth.requireAuth();
+if (!me) {
+  location.href = "login.html";
+  throw new Error("redirecting to login");
+}
 
 // ── Constants (per v2 plan) ───────────────────────────────────────────
 const REVEAL_DELAY_MS = 1500;
@@ -50,6 +59,13 @@ const params = new URLSearchParams(location.search);
 const tierNum = Math.min(7, Math.max(1, parseInt(params.get("t") || "1", 10)));
 document.title = `T${tierNum} · 词卡`;
 document.getElementById("tierTitle").textContent = `T${tierNum} 学习中`;
+document.getElementById("acctChip").innerHTML =
+  `${escapeHtml(me.name)} · <a href="#" id="logoutLink">切换</a>`;
+document.getElementById("logoutLink").addEventListener("click", (e) => {
+  e.preventDefault();
+  auth.logout();
+  location.href = "login.html";
+});
 document.getElementById("newLimit").textContent = NEW_LIMIT;
 document.getElementById("reviewLimit").textContent = REVIEW_LIMIT;
 
