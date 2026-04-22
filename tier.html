@@ -12,6 +12,7 @@
     <h1 id="tierTitle">…</h1>
     <div class="links">
       <span id="acctChip" class="account-chip"></span>
+      <a href="settings.html" title="设置">⚙</a>
       <a href="index.html">← 返回</a>
     </div>
   </header>
@@ -76,6 +77,7 @@ const sessionBar = document.getElementById("sessionBar");
 
 let cards = [];
 let state = storage.load(tierNum);
+let settings = storage.loadSettings();
 let currentCard = null;
 let currentKind = null;        // "new" | "review"
 let revealTimer = null;
@@ -178,6 +180,19 @@ function renderFront(card, restartTimer) {
   }, REVEAL_DELAY_MS);
 
   flipBtn.addEventListener("click", () => doFlip(card));
+
+  // Auto-play audio per user setting (only when showing English on the front,
+  // i.e. NOT in productive L1→L2 mode where the front is Chinese).
+  if (!showProductive && tts.isAvailable()) {
+    const shouldPlay =
+      settings.autoPlayAudio === "all" ||
+      (settings.autoPlayAudio === "new" && currentKind === "new");
+    if (shouldPlay) {
+      // Slight delay so the word renders before TTS fires; some browsers
+      // also need a microtask to register the utterance.
+      setTimeout(() => tts.speak(card.w), 60);
+    }
+  }
 }
 
 // ── Back side ─────────────────────────────────────────────────────────

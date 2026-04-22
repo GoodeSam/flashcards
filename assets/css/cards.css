@@ -427,6 +427,20 @@ a { color: #2563eb; text-decoration: none; }
   margin-top: 8px;
 }
 
+.radio-group { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.radio-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.radio-row:hover { background: #f8fafc; }
+.radio-row input[type=radio] { margin-top: 3px; flex-shrink: 0; }
+.radio-row span { font-size: 13px; color: #334155; line-height: 1.5; }
+.radio-row strong { color: #0f172a; }
+
 /* Topbar account chip */
 .account-chip {
   display: inline-flex; align-items: center; gap: 6px;

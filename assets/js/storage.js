@@ -72,6 +72,31 @@ export function save(state, userId = requireUserId()) {
   localStorage.setItem(tierKey(userId, state.tier), JSON.stringify({ ...state, checksum }));
 }
 
+// ── Per-user settings ────────────────────────────────────────────────
+
+const DEFAULT_SETTINGS = Object.freeze({
+  autoPlayAudio: "off", // "off" | "new" | "all"
+});
+
+function settingsKey(userId) {
+  return userKey(userId, "settings");
+}
+
+export function loadSettings(userId = requireUserId()) {
+  try {
+    const raw = localStorage.getItem(settingsKey(userId));
+    return { ...DEFAULT_SETTINGS, ...(raw ? JSON.parse(raw) : {}) };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+export function saveSettings(partial, userId = requireUserId()) {
+  const merged = { ...loadSettings(userId), ...partial };
+  localStorage.setItem(settingsKey(userId), JSON.stringify(merged));
+  return merged;
+}
+
 export function bumpStats(state, kind) {
   if (state.today !== todayStr()) {
     state.today = todayStr();
@@ -90,6 +115,7 @@ export function exportAll(userId = requireUserId()) {
     schema: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     user: user ? { id: user.id, name: user.name, hint: user.hint, ph: user.ph } : null,
+    settings: loadSettings(userId),
     tiers: {},
   };
   for (let t = 1; t <= 7; t += 1) {
@@ -128,6 +154,15 @@ export async function importAll(jsonText, opts = {}) {
     }
   } else {
     mode = "merge";
+  }
+
+  // Restore settings (overwrite for new accounts; merge for existing)
+  if (obj.settings) {
+    if (mode === "new") {
+      saveSettings(obj.settings, user.id);
+    } else {
+      saveSettings(obj.settings, user.id); // partial-merge happens inside saveSettings
+    }
   }
 
   let tiersRestored = 0;
