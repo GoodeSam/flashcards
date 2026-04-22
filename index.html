@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flashcards · 7 档词卡</title>
+<link rel="stylesheet" href="assets/css/cards.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <h1>7 档词卡</h1>
+    <div class="links">
+      <a href="#about">说明</a>
+    </div>
+  </header>
+
+  <section class="intro">
+    选一档开始学习。词汇表共 2177 词，按词频等分为 7 档：
+    <strong>T1</strong> 最高频 (骨架词) → <strong>T7</strong> 最低频 (长尾)。
+    建议从与自己水平匹配的档位开始。<br>
+    进度自动保存在本机（<code>localStorage</code>）。换设备前请导出。
+  </section>
+
+  <div id="tierGrid" class="tier-grid">
+    <div class="spinner"></div>
+  </div>
+
+  <section class="backup-panel" id="backupPanel" hidden>
+    <div>所有档位进度备份 · 换设备 / 清缓存前请导出</div>
+    <button id="exportBtn" type="button">导出 JSON</button>
+    <label class="file-label" for="importFile">导入 JSON…</label>
+    <input type="file" id="importFile" accept="application/json">
+    <span id="backupStatus" style="margin-left:8px;font-size:12px;"></span>
+  </section>
+
+  <section class="intro" id="about" style="margin-top:24px;font-size:13px;">
+    <strong>学习机制：</strong>
+    每张卡先出英文 + 音标，1.5 秒后可翻到中文；自评后按 5 箱 Leitner
+    间隔重现（错词 5 分钟再出，对词 1/2/4/8/16 天递增）。同档内相邻词做了
+    干扰打散（首字母 / 尾缀 / 词性 / 编辑距离 ≥2 条命中视为冲突）。
+    档内 ≥80% 词进入 box3+ 时解锁 L1→L2 产出模式。
+  </section>
+</div>
+
+<script type="module">
+  import { load } from "./assets/js/storage.js";
+  import { progressStats } from "./assets/js/srs.js";
+  import { downloadExport, importAll } from "./assets/js/storage.js";
+
+  const grid = document.getElementById("tierGrid");
+
+  async function main() {
+    let meta;
+    try {
+      const res = await fetch("data/meta.json", { cache: "no-cache" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      meta = await res.json();
+    } catch (e) {
+      grid.innerHTML = `<div class="error-box">加载档位元数据失败: ${e.message}<br>
+        请确认 <code>docs/data/meta.json</code> 存在，并用本地 HTTP 服务访问。</div>`;
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    for (const t of meta.tiers) {
+      const cards = await fetch(`data/${t.file}`, { cache: "no-cache" }).then((r) => r.json()).catch(() => []);
+      const state = load(t.tier);
+      const stats = progressStats(cards, state.cards || {});
+      const pct = stats.total ? Math.round((stats.seen / stats.total) * 100) : 0;
+      const productive = stats.productiveUnlocked ? " ✓ 产出解锁" : "";
+
+      const a = document.createElement("a");
+      a.href = `tier.html?t=${t.tier}`;
+      a.className = "tier-card";
+      a.innerHTML = `
+        <div class="tier-label">
+          <span class="tier-num">T${t.tier}</span>
+          <span class="tier-audience">${t.audience}</span>
+        </div>
+        <div class="tier-meta">
+          <span>${t.count} 词</span>
+          <span>freq ${t.freqMin}–${t.freqMax}</span>
+          <span>义教 ${t.ywCount} · 高考 ${t.gkCount}</span>
+        </div>
+        <div class="tier-meta" style="color:#0f172a;margin-top:4px;">
+          进度 ${stats.seen}/${stats.total} · box3+ ${Math.round(stats.box3PlusRatio*100)}%${productive}
+        </div>
+        <div class="progress-bar"><span style="width:${pct}%"></span></div>
+      `;
+      frag.appendChild(a);
+    }
+    grid.innerHTML = "";
+    grid.appendChild(frag);
+
+    // Wire backup panel
+    document.getElementById("backupPanel").hidden = false;
+    document.getElementById("exportBtn").addEventListener("click", () => {
+      downloadExport();
+      document.getElementById("backupStatus").textContent = "已导出 ✓";
+    });
+    document.getElementById("importFile").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const count = importAll(text);
+        document.getElementById("backupStatus").textContent = `已导入 ${count} 档 ✓ 刷新中…`;
+        setTimeout(() => location.reload(), 600);
+      } catch (err) {
+        document.getElementById("backupStatus").textContent = `导入失败: ${err.message}`;
+      }
+    });
+  }
+  main();
+</script>
+</body>
+</html>

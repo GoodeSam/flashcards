@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "generatedAt": "2026-04-22T01:15:19Z",
+  "totalWords": 2177,
+  "tierCount": 7,
+  "tiers": [
+    {
+      "tier": 1,
+      "audience": "小学高年级 / 零起点",
+      "count": 311,
+      "freqMin": 221,
+      "freqMax": 22828,
+      "ywCount": 303,
+      "gkCount": 306,
+      "fileSize": 55128,
+      "file": "tier1.json"
+    },
+    {
+      "tier": 2,
+      "audience": "初一起步",
+      "count": 311,
+      "freqMin": 101,
+      "freqMax": 221,
+      "ywCount": 279,
+      "gkCount": 294,
+      "fileSize": 55515,
+      "file": "tier2.json"
+    },
+    {
+      "tier": 3,
+      "audience": "初一下–初二上",
+      "count": 311,
+      "freqMin": 61,
+      "freqMax": 101,
+      "ywCount": 264,
+      "gkCount": 291,
+      "fileSize": 54079,
+      "file": "tier3.json"
+    },
+    {
+      "tier": 4,
+      "audience": "初二下",
+      "count": 311,
+      "freqMin": 37,
+      "freqMax": 61,
+      "ywCount": 232,
+      "gkCount": 281,
+      "fileSize": 53438,
+      "file": "tier4.json"
+    },
+    {
+      "tier": 5,
+      "audience": "初三 / 中考准备",
+      "count": 311,
+      "freqMin": 23,
+      "freqMax": 37,
+      "ywCount": 189,
+      "gkCount": 265,
+      "fileSize": 52742,
+      "file": "tier5.json"
+    },
+    {
+      "tier": 6,
+      "audience": "高一 / 中考冲刺",
+      "count": 311,
+      "freqMin": 14,
+      "freqMax": 23,
+      "ywCount": 123,
+      "gkCount": 240,
+      "fileSize": 53518,
+      "file": "tier6.json"
+    },
+    {
+      "tier": 7,
+      "audience": "高考衔接 / 语料尾部",
+      "count": 311,
+      "freqMin": 6,
+      "freqMax": 14,
+      "ywCount": 82,
+      "gkCount": 224,
+      "fileSize": 52278,
+      "file": "tier7.json"
+    }
+  ]
+}

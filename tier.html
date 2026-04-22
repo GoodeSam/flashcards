@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学习 · 词卡</title>
+<link rel="stylesheet" href="assets/css/cards.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <h1 id="tierTitle">…</h1>
+    <div class="links">
+      <a href="index.html">← 返回</a>
+    </div>
+  </header>
+
+  <div id="errorBox" class="error-box hidden"></div>
+
+  <div class="session-bar" id="sessionBar" hidden>
+    <div>新词 <strong id="newCount">0</strong>/<span id="newLimit">20</span></div>
+    <div class="progress-wrap">
+      <div class="progress-bar"><span id="sessionProgress" style="width:0%"></span></div>
+    </div>
+    <div>复习 <strong id="reviewCount">0</strong>/<span id="reviewLimit">20</span></div>
+  </div>
+
+  <div id="cardArea">
+    <div class="spinner"></div>
+  </div>
+
+  <div class="action-area" id="actionArea"></div>
+</div>
+
+<script type="module">
+import * as srs from "./assets/js/srs.js";
+import * as storage from "./assets/js/storage.js";
+import * as grader from "./assets/js/grader.js";
+import * as tts from "./assets/js/tts.js";
+
+// ── Constants (per v2 plan) ───────────────────────────────────────────
+const REVEAL_DELAY_MS = 1500;
+const EVAL_DELAY_MS = 2000;
+const NEW_LIMIT = 20;
+const REVIEW_LIMIT = 20;
+const BLUR_PAUSE_MS = 10000;
+
+// ── Boot ──────────────────────────────────────────────────────────────
+const params = new URLSearchParams(location.search);
+const tierNum = Math.min(7, Math.max(1, parseInt(params.get("t") || "1", 10)));
+document.title = `T${tierNum} · 词卡`;
+document.getElementById("tierTitle").textContent = `T${tierNum} 学习中`;
+document.getElementById("newLimit").textContent = NEW_LIMIT;
+document.getElementById("reviewLimit").textContent = REVIEW_LIMIT;
+
+const cardArea = document.getElementById("cardArea");
+const actionArea = document.getElementById("actionArea");
+const errorBox = document.getElementById("errorBox");
+const sessionBar = document.getElementById("sessionBar");
+
+let cards = [];
+let state = storage.load(tierNum);
+let currentCard = null;
+let currentKind = null;        // "new" | "review"
+let revealTimer = null;
+let evalTimer = null;
+let blurTimer = null;
+let revealedAt = 0;            // timestamp when card was revealed
+let isFlipped = false;
+let productiveUnlocked = false;
+
+bootstrap();
+
+async function bootstrap() {
+  try {
+    const res = await fetch(`data/tier${tierNum}.json`, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    cards = await res.json();
+  } catch (e) {
+    showError(`加载 tier${tierNum}.json 失败：${e.message}<br>请用本地 HTTP 服务（如 <code>python3 -m http.server</code>）访问。`);
+    return;
+  }
+  sessionBar.hidden = false;
+  productiveUnlocked = srs.progressStats(cards, state.cards).productiveUnlocked;
+  refreshSessionBar();
+  showNext();
+
+  // Tab/visibility pause: any blur >10s resets reveal timer (Quality-of-Attention guard)
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      blurTimer = setTimeout(() => {
+        // If on front side waiting to flip, reset reveal countdown
+        if (currentCard && !isFlipped) renderFront(currentCard, true);
+      }, BLUR_PAUSE_MS);
+    } else if (blurTimer) {
+      clearTimeout(blurTimer);
+      blurTimer = null;
+    }
+  });
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────
+function showNext() {
+  clearTimers();
+  const next = srs.pickNext(cards, state.cards, {
+    newLimit: NEW_LIMIT,
+    reviewLimit: REVIEW_LIMIT,
+    newToday: state.stats.newToday,
+    reviewedToday: state.stats.reviewedToday,
+  });
+  if (!next.card) {
+    renderDone();
+    return;
+  }
+  currentCard = next.card;
+  currentKind = next.kind;
+  isFlipped = false;
+  renderFront(currentCard, false);
+}
+
+// ── Front side ────────────────────────────────────────────────────────
+function renderFront(card, restartTimer) {
+  const showProductive = productiveUnlocked && currentKind === "review";
+  const phoneticHtml = card.ph
+    ? `<div class="phonetic">${escapeHtml(card.ph)}</div>`
+    : "";
+  const productiveHtml = showProductive
+    ? `<div class="productive-input">
+         <input id="answerInput" type="text" autocomplete="off" autocapitalize="off"
+                spellcheck="false" placeholder="先输入英文单词…" />
+         <span class="hint">L1→L2 模式：根据中文回忆英文（可跳过）</span>
+       </div>`
+    : "";
+
+  cardArea.innerHTML = `
+    <div class="card-stage">
+      <div class="card" id="cardEl">
+        <div class="card-face card-front">
+          <div class="word">${showProductive ? escapeHtml(card.cn || "释义缺失") : escapeHtml(card.w)}</div>
+          ${showProductive ? "" : phoneticHtml}
+          ${tts.isAvailable() && !showProductive
+            ? `<button class="pron-btn" id="pronBtn" type="button">🔊 发音</button>`
+            : showProductive ? "" : `<button class="pron-btn" disabled title="本浏览器不支持发音">🔊 发音</button>`}
+          ${productiveHtml}
+        </div>
+        <div class="card-face card-back" id="backFace"></div>
+      </div>
+    </div>
+  `;
+
+  if (!showProductive && tts.isAvailable()) {
+    document.getElementById("pronBtn").addEventListener("click", () => tts.speak(card.w));
+  }
+
+  actionArea.innerHTML = `<button class="flip-btn" id="flipBtn" disabled>翻卡查看 (1.5s)</button>`;
+  const flipBtn = document.getElementById("flipBtn");
+
+  if (revealTimer) clearTimeout(revealTimer);
+  revealTimer = setTimeout(() => {
+    flipBtn.disabled = false;
+    flipBtn.textContent = "翻卡查看";
+  }, REVEAL_DELAY_MS);
+
+  flipBtn.addEventListener("click", () => doFlip(card));
+}
+
+// ── Back side ─────────────────────────────────────────────────────────
+function doFlip(card) {
+  if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+  isFlipped = true;
+  revealedAt = Date.now();
+
+  // Productive grader feedback
+  let suggested = null;
+  let graderHtml = "";
+  if (productiveUnlocked && currentKind === "review") {
+    const inp = document.getElementById("answerInput");
+    if (inp && inp.value.trim()) {
+      const result = grader.gradeProductive(inp.value, card.w);
+      suggested = result.eval;
+      graderHtml = `<div class="grader-feedback ${result.eval.toLowerCase()}">
+        你输入「${escapeHtml(inp.value)}」 → ${escapeHtml(result.reason)} · 建议自评：<strong>${result.eval}</strong>
+      </div>`;
+    }
+  }
+
+  // Build back face
+  const showProductive = productiveUnlocked && currentKind === "review";
+  const cn = card.cn || "释义缺失，请反馈";
+  const formsHtml = card.forms ? `<div class="forms">${escapeHtml(card.forms)}</div>` : "";
+  const posHtml = card.pos && card.pos !== "unknown"
+    ? `<span class="pos-badge">${escapeHtml(card.pos)}.</span>`
+    : "";
+  const badges = [];
+  if (card.yw) badges.push('<span class="badge yw">义教课标</span>');
+  if (card.gk) badges.push('<span class="badge gk">高考3500</span>');
+  if (card.d != null && card.d >= 0.7) badges.push('<span class="badge hard">难词</span>');
+  const badgesHtml = badges.length ? `<div class="badges">${badges.join("")}</div>` : "";
+
+  const backFace = document.getElementById("backFace");
+  backFace.innerHTML = `
+    ${showProductive
+      ? `<div style="font-size:32px;font-weight:700;text-align:center;margin:24px 0 12px;">${escapeHtml(card.w)}</div>
+         ${card.ph ? `<div class="phonetic" style="text-align:center;margin-bottom:14px;">${escapeHtml(card.ph)}</div>` : ""}`
+      : ""}
+    ${posHtml ? `<div>${posHtml}</div>` : ""}
+    <div class="meaning">${escapeHtml(cn)}</div>
+    ${formsHtml}
+    ${badgesHtml}
+    ${graderHtml}
+  `;
+  document.getElementById("cardEl").classList.add("flipped");
+
+  // Render eval buttons after EVAL_DELAY_MS (force reading the back)
+  actionArea.innerHTML = `<div style="text-align:center;color:#64748b;font-size:13px;padding:14px;">阅读释义中… (${EVAL_DELAY_MS/1000}s)</div>`;
+  if (evalTimer) clearTimeout(evalTimer);
+  evalTimer = setTimeout(() => renderEvalButtons(card, suggested), EVAL_DELAY_MS);
+}
+
+function renderEvalButtons(card, suggestedEval) {
+  // Two-button MVP fallback if user has zero history (gentler ramp)
+  const hasHistory = (state.cards[card.id]?.history?.length || 0) > 0;
+  const fourButton = true; // V1 default
+
+  const labels = fourButton
+    ? [
+        { key: srs.Eval.Again, label: "再来", interval: "<5 min" },
+        { key: srs.Eval.Hard, label: "难", interval: "1d" },
+        { key: srs.Eval.Good, label: "一般", interval: previewInterval(card, srs.Eval.Good) },
+        { key: srs.Eval.Easy, label: "简单", interval: previewInterval(card, srs.Eval.Easy) },
+      ]
+    : [
+        { key: srs.Eval.Again, label: "再来", interval: "<5 min" },
+        { key: srs.Eval.Good, label: "记得", interval: previewInterval(card, srs.Eval.Good) },
+      ];
+
+  actionArea.innerHTML = `<div class="eval-row${fourButton ? "" : " two-button"}">
+    ${labels.map((b) => `
+      <button class="eval-btn" data-eval="${b.key}" ${suggestedEval === b.key ? "autofocus" : ""}>
+        <span class="label">${b.label}</span>
+        <span class="interval">${b.interval}</span>
+      </button>`).join("")}
+  </div>`;
+
+  for (const btn of actionArea.querySelectorAll(".eval-btn")) {
+    btn.addEventListener("click", () => onEval(card, btn.dataset.eval));
+  }
+}
+
+function onEval(card, evalKey) {
+  const oldState = state.cards[card.id] || srs.newCardState();
+  const wasNew = (oldState.box || 0) === 0;
+  const newState = srs.applyEval(oldState, evalKey);
+  state.cards[card.id] = newState;
+  storage.bumpStats(state, wasNew ? "new" : "review");
+  storage.save(state);
+
+  // Re-check productive unlock on every save
+  productiveUnlocked = srs.progressStats(cards, state.cards).productiveUnlocked;
+
+  refreshSessionBar();
+  showNext();
+}
+
+// ── Done overlay ──────────────────────────────────────────────────────
+function renderDone() {
+  const stats = srs.progressStats(cards, state.cards);
+  cardArea.innerHTML = `
+    <div class="overlay">
+      <h2>今日完成 🎉</h2>
+      <p>每日新词 / 复习已达上限。明天继续吧！</p>
+      <div class="stat-row">
+        <div><strong>${state.stats.newToday}</strong>新词</div>
+        <div><strong>${state.stats.reviewedToday}</strong>复习</div>
+        <div><strong>${stats.seen}/${stats.total}</strong>累计</div>
+        <div><strong>${Math.round(stats.box3PlusRatio*100)}%</strong>box3+</div>
+      </div>
+      ${stats.productiveUnlocked
+        ? "<p style='color:#16a34a'>✓ 已解锁 L1→L2 产出模式（下次复习生效）</p>"
+        : `<p>距 L1→L2 解锁还差 ${Math.max(0, Math.ceil((0.8 - stats.box3PlusRatio) * stats.total))} 词进入 box3+</p>`}
+      <button onclick="location.href='index.html'">返回档位</button>
+    </div>
+  `;
+  actionArea.innerHTML = "";
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+function refreshSessionBar() {
+  document.getElementById("newCount").textContent = state.stats.newToday;
+  document.getElementById("reviewCount").textContent = state.stats.reviewedToday;
+  const total = NEW_LIMIT + REVIEW_LIMIT;
+  const done = state.stats.newToday + state.stats.reviewedToday;
+  document.getElementById("sessionProgress").style.width = Math.min(100, (done / total) * 100) + "%";
+}
+
+function previewInterval(card, evalKey) {
+  const next = srs.applyEval(state.cards[card.id] || srs.newCardState(), evalKey);
+  const ms = next.due - Date.now();
+  if (ms < 60_000) return "<1 min";
+  if (ms < 3_600_000) return Math.round(ms / 60_000) + " min";
+  if (ms < 86_400_000) return Math.round(ms / 3_600_000) + " h";
+  return Math.round(ms / 86_400_000) + " d";
+}
+
+function clearTimers() {
+  if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+  if (evalTimer) { clearTimeout(evalTimer); evalTimer = null; }
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function showError(msg) {
+  errorBox.innerHTML = msg;
+  errorBox.classList.remove("hidden");
+  cardArea.innerHTML = "";
+}
+</script>
+</body>
+</html>
