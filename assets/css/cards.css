@@ -327,7 +327,8 @@ a { color: #2563eb; text-decoration: none; }
   gap: 8px;
 }
 .eval-row.two-button { grid-template-columns: 1fr 1fr; }
-.eval-row.single-button { grid-template-columns: 1fr; max-width: 360px; margin: 0 auto; }
+.eval-row.single-button { display: flex; justify-content: center; }
+.eval-row.single-button .eval-btn { flex: 0 1 320px; min-width: 240px; }
 .eval-btn {
   background: #fff;
   border: 1px solid var(--border);
