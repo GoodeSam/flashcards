@@ -175,16 +175,37 @@ function renderFront(card, restartTimer) {
     document.getElementById("pronBtn").addEventListener("click", () => tts.speak(card.w));
   }
 
-  actionArea.innerHTML = `<button class="flip-btn" id="flipBtn" disabled>翻卡查看 (1.5s)</button>`;
-  const flipBtn = document.getElementById("flipBtn");
-
-  if (revealTimer) clearTimeout(revealTimer);
-  revealTimer = setTimeout(() => {
-    flipBtn.disabled = false;
-    flipBtn.textContent = "翻卡查看";
-  }, REVEAL_DELAY_MS);
-
-  flipBtn.addEventListener("click", () => doFlip(card));
+  if (showProductive) {
+    // L1→L2 产出模式：输入就是猜测，保留单按钮 + 4 档 grader 流程
+    actionArea.innerHTML = `<button class="flip-btn" id="flipBtn" disabled>翻卡查看 (1.5s)</button>`;
+    const flipBtn = document.getElementById("flipBtn");
+    if (revealTimer) clearTimeout(revealTimer);
+    revealTimer = setTimeout(() => {
+      flipBtn.disabled = false;
+      flipBtn.textContent = "翻卡查看";
+    }, REVEAL_DELAY_MS);
+    flipBtn.addEventListener("click", () => doFlip(card, "productive"));
+  } else {
+    // L2→L1 默认：1.5s 默读后 → 知道 / 不知道 二选一
+    actionArea.innerHTML =
+      `<div class="prefold-hint" style="text-align:center;color:#64748b;font-size:13px;padding:14px;">先在心里想一下释义…(${REVEAL_DELAY_MS/1000}s)</div>`;
+    if (revealTimer) clearTimeout(revealTimer);
+    revealTimer = setTimeout(() => {
+      actionArea.innerHTML = `<div class="eval-row two-button prefold-row">
+        <button class="eval-btn guess-known" data-guess="known">
+          <span class="label">✓ 我知道</span>
+          <span class="interval">翻卡确认</span>
+        </button>
+        <button class="eval-btn guess-unknown" data-guess="unknown">
+          <span class="label">✗ 不知道</span>
+          <span class="interval">翻卡学习</span>
+        </button>
+      </div>`;
+      for (const btn of actionArea.querySelectorAll("[data-guess]")) {
+        btn.addEventListener("click", () => doFlip(card, btn.dataset.guess));
+      }
+    }, REVEAL_DELAY_MS);
+  }
 
   // Auto-play audio per user setting (only when showing English on the front,
   // i.e. NOT in productive L1→L2 mode where the front is Chinese).
@@ -201,15 +222,15 @@ function renderFront(card, restartTimer) {
 }
 
 // ── Back side ─────────────────────────────────────────────────────────
-function doFlip(card) {
+function doFlip(card, preGuess) {
   if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
   isFlipped = true;
   revealedAt = Date.now();
 
-  // Productive grader feedback
+  // Productive grader feedback（仅在产出模式分支生效）
   let suggested = null;
   let graderHtml = "";
-  if (productiveUnlocked && currentKind === "review") {
+  if (preGuess === "productive" && productiveUnlocked && currentKind === "review") {
     const inp = document.getElementById("answerInput");
     if (inp && inp.value.trim()) {
       const result = grader.gradeProductive(inp.value, card.w);
@@ -250,7 +271,13 @@ function doFlip(card) {
   // Render eval buttons after EVAL_DELAY_MS (force reading the back)
   actionArea.innerHTML = `<div style="text-align:center;color:#64748b;font-size:13px;padding:14px;">阅读释义中… (${EVAL_DELAY_MS/1000}s)</div>`;
   if (evalTimer) clearTimeout(evalTimer);
-  evalTimer = setTimeout(() => renderEvalButtons(card, suggested), EVAL_DELAY_MS);
+  evalTimer = setTimeout(() => {
+    if (preGuess === "productive") {
+      renderEvalButtons(card, suggested);
+    } else {
+      renderConfirmButtons(card, preGuess);
+    }
+  }, EVAL_DELAY_MS);
 }
 
 function renderEvalButtons(card, suggestedEval) {
@@ -273,6 +300,33 @@ function renderEvalButtons(card, suggestedEval) {
   actionArea.innerHTML = `<div class="eval-row${fourButton ? "" : " two-button"}">
     ${labels.map((b) => `
       <button class="eval-btn" data-eval="${b.key}" ${suggestedEval === b.key ? "autofocus" : ""}>
+        <span class="label">${b.label}</span>
+        <span class="interval">${b.interval}</span>
+      </button>`).join("")}
+  </div>`;
+
+  for (const btn of actionArea.querySelectorAll(".eval-btn")) {
+    btn.addEventListener("click", () => onEval(card, btn.dataset.eval));
+  }
+}
+
+// 二阶段确认按钮：根据翻卡前的「知道 / 不知道」判断，给出相应的自评选项。
+// - 知道：2 按钮（对上了晋级 / 想错了重来）
+// - 不知道：1 按钮，一律 Again 5 分钟再来，直到用户改选「知道」才能晋级
+function renderConfirmButtons(card, preGuess) {
+  const labels = preGuess === "known"
+    ? [
+        { key: srs.Eval.Good, label: "✓ 和我想的一样", interval: previewInterval(card, srs.Eval.Good) },
+        { key: srs.Eval.Again, label: "✗ 其实想错了", interval: "<5 min" },
+      ]
+    : [
+        { key: srs.Eval.Again, label: "知道了,待会再见", interval: "<5 min" },
+      ];
+
+  const rowClass = labels.length === 1 ? "single-button confirm-row" : "two-button confirm-row";
+  actionArea.innerHTML = `<div class="eval-row ${rowClass}">
+    ${labels.map((b) => `
+      <button class="eval-btn" data-eval="${b.key}">
         <span class="label">${b.label}</span>
         <span class="interval">${b.interval}</span>
       </button>`).join("")}

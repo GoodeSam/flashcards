@@ -327,6 +327,7 @@ a { color: #2563eb; text-decoration: none; }
   gap: 8px;
 }
 .eval-row.two-button { grid-template-columns: 1fr 1fr; }
+.eval-row.single-button { grid-template-columns: 1fr; max-width: 360px; margin: 0 auto; }
 .eval-btn {
   background: #fff;
   border: 1px solid var(--border);
