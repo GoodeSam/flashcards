@@ -277,6 +277,30 @@ a { color: #2563eb; text-decoration: none; }
   margin: 8px 0;
   font-family: "SF Mono", Menlo, monospace;
 }
+.card-back .example {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: #f1f5f9;
+  border-left: 3px solid #60a5fa;
+  border-radius: 0 6px 6px 0;
+}
+.card-back .example .example-en {
+  font-size: 15px;
+  color: #0f172a;
+  line-height: 1.5;
+}
+.card-back .example .example-cn {
+  font-size: 14px;
+  color: #475569;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.card-back .example .example-src {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 6px;
+  text-align: right;
+}
 .card-back .badges { margin-top: 4px; }
 .card-back .badge {
   display: inline-block;

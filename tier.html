@@ -254,6 +254,14 @@ function doFlip(card, preGuess) {
   if (card.d != null && card.d >= 0.7) badges.push('<span class="badge hard">难词</span>');
   const badgesHtml = badges.length ? `<div class="badges">${badges.join("")}</div>` : "";
 
+  const exampleHtml = card.ex_en
+    ? `<div class="example">
+         <div class="example-en">${escapeHtml(card.ex_en)}</div>
+         ${card.ex_cn ? `<div class="example-cn">${escapeHtml(card.ex_cn)}</div>` : ""}
+         ${card.src ? `<div class="example-src">— ${escapeHtml(card.src)}</div>` : ""}
+       </div>`
+    : "";
+
   const backFace = document.getElementById("backFace");
   backFace.innerHTML = `
     ${showProductive
@@ -263,6 +271,7 @@ function doFlip(card, preGuess) {
     ${posHtml ? `<div>${posHtml}</div>` : ""}
     <div class="meaning">${escapeHtml(cn)}</div>
     ${formsHtml}
+    ${exampleHtml}
     ${badgesHtml}
     ${graderHtml}
   `;
